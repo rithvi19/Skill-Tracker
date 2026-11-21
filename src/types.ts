@@ -45,6 +45,45 @@ export interface ActivityLog {
   createdAt: string;
 }
 
+export interface YouTubeVideo {
+  videoId: string;
+  title: string;
+  thumbnail: string;
+  channelTitle: string;
+  description: string;
+  duration?: string;
+  publishedAt?: string;
+  watchUrl: string;
+  embedUrl: string;
+}
+
+export interface RoadmapStep {
+  stepNumber: number;
+  title: string;
+  detailedExplanation: string;
+  topics: string[];
+  prerequisites: string[];
+  practicalExercises: string[];
+  miniProjects: string[];
+  estimatedTime: string;
+  difficulty: Difficulty;
+  learningOutcome: string;
+  completed: boolean;
+  completedAt?: string;
+  started?: boolean;
+  completedExercises?: number[]; // indices of completed practical exercises
+  videos: YouTubeVideo[];
+  fallbackSearchUrl: string;
+}
+
+export interface RoadmapAdvisory {
+  nextStepNumber?: number;
+  nextStepTitle?: string;
+  recommendationText: string;
+  identifiedGaps: string[];
+  practiceSuggestions: string[];
+}
+
 export interface AIRecommendation {
   id: string;
   skillId: string;
@@ -55,5 +94,7 @@ export interface AIRecommendation {
   roadmap: string[];
   interviewPrep: string[];
   advanced: string[];
+  roadmapSteps?: RoadmapStep[];
+  advisory?: RoadmapAdvisory;
   createdAt: string;
 }

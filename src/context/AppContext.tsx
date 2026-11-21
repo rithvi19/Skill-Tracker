@@ -21,7 +21,7 @@ interface AppContextType {
   removeToast: (id: string) => void;
   toggleTheme: () => void;
   login: (user: User, token: string) => void;
-  logout: () => void;
+  logout: (silent?: boolean) => void;
   refreshUser: () => Promise<void>;
   fetchSkills: () => Promise<void>;
   fetchLogs: () => Promise<void>;
@@ -214,7 +214,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         ]);
       } else {
         // Token has expired or state corrupted
-        logout();
+        logout(true);
       }
     } catch (e) {
       console.error("Critical auth bootstrap failure:", e);
@@ -233,13 +233,15 @@ export function AppProvider({ children }: { children: ReactNode }) {
     addToast(`Welcome back, ${userData.name}!`, 'success');
   };
 
-  const logout = () => {
+  const logout = (silent = false) => {
     setUser(null);
     setToken(null);
     setSkills([]);
     setLogs([]);
     localStorage.removeItem('skill_token');
-    addToast("Logged out successfully.", 'info');
+    if (!silent) {
+      addToast("Logged out successfully.", 'info');
+    }
   };
 
   const refreshUser = async () => {

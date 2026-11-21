@@ -1,7 +1,8 @@
 import fs from 'fs';
 import path from 'path';
 import crypto from 'crypto';
-import { User, Skill, Task, ActivityLog, AIRecommendation } from '../src/types';
+import { User, Skill, Task, ActivityLog, AIRecommendation, RoadmapStep } from '../src/types';
+import { computeRoadmapAdvisory } from './gemini';
 
 const DB_PATH = path.join(process.cwd(), 'db.json');
 
@@ -480,12 +481,32 @@ export class JSONDb {
     if (skillIdx === -1) return;
 
     const skillTasks = db.tasks.filter(t => t.skillId === skillId);
-    if (skillTasks.length === 0) {
-      db.skills[skillIdx].progress = 0;
+    const rec = db.recommendations.find(r => r.skillId === skillId);
+
+    const hasRoadmap = rec && rec.roadmapSteps && rec.roadmapSteps.length > 0;
+    const hasTasks = skillTasks.length > 0;
+
+    let calculatedProgress = 0;
+
+    if (hasRoadmap && hasTasks) {
+      const completedSteps = rec!.roadmapSteps!.filter(s => s.completed).length;
+      const roadmapPct = (completedSteps / rec!.roadmapSteps!.length) * 100;
+
+      const completedTasks = skillTasks.filter(t => t.completed).length;
+      const taskPct = (completedTasks / skillTasks.length) * 100;
+
+      calculatedProgress = Math.round((roadmapPct + taskPct) / 2);
+    } else if (hasRoadmap) {
+      const completedSteps = rec!.roadmapSteps!.filter(s => s.completed).length;
+      calculatedProgress = Math.round((completedSteps / rec!.roadmapSteps!.length) * 100);
+    } else if (hasTasks) {
+      const completedTasks = skillTasks.filter(t => t.completed).length;
+      calculatedProgress = Math.round((completedTasks / skillTasks.length) * 100);
     } else {
-      const completed = skillTasks.filter(t => t.completed).length;
-      db.skills[skillIdx].progress = Math.round((completed / skillTasks.length) * 100);
+      calculatedProgress = 0;
     }
+
+    db.skills[skillIdx].progress = Math.min(100, Math.max(0, calculatedProgress));
     this.save(db);
   }
 
@@ -535,6 +556,86 @@ export class JSONDb {
 
     this.save(db);
     return recData;
+  }
+
+  public static toggleRoadmapStep(skillId: string, stepNumber: number, completed: boolean): { recommendation: AIRecommendation; skill?: Skill } {
+    const db = this.load();
+    const idx = db.recommendations.findIndex(r => r.skillId === skillId);
+    if (idx === -1) {
+      throw new Error("No learning roadmap found for this skill.");
+    }
+
+    const rec = db.recommendations[idx];
+    if (!rec.roadmapSteps || !Array.isArray(rec.roadmapSteps)) {
+      throw new Error("Roadmap has no structured steps.");
+    }
+
+    const stepIdx = rec.roadmapSteps.findIndex(s => s.stepNumber === stepNumber);
+    if (stepIdx === -1) {
+      throw new Error(`Step #${stepNumber} not found in roadmap.`);
+    }
+
+    rec.roadmapSteps[stepIdx].completed = completed;
+    rec.roadmapSteps[stepIdx].completedAt = completed ? new Date().toISOString() : undefined;
+    if (completed) {
+      rec.roadmapSteps[stepIdx].started = true;
+    }
+
+    const skill = db.skills.find(s => s.id === skillId);
+    if (skill) {
+      rec.advisory = computeRoadmapAdvisory(rec.roadmapSteps, skill.name);
+    }
+
+    db.recommendations[idx] = rec;
+    this.save(db);
+
+    this.recalculateSkillProgress(skillId);
+
+    const updatedSkill = this.getSkillById(skillId);
+    return { recommendation: rec, skill: updatedSkill };
+  }
+
+  public static toggleRoadmapStepExercise(skillId: string, stepNumber: number, exerciseIndex: number): AIRecommendation {
+    const db = this.load();
+    const idx = db.recommendations.findIndex(r => r.skillId === skillId);
+    if (idx === -1) throw new Error("No learning roadmap found.");
+
+    const rec = db.recommendations[idx];
+    if (!rec.roadmapSteps) throw new Error("No roadmap steps found.");
+
+    const stepIdx = rec.roadmapSteps.findIndex(s => s.stepNumber === stepNumber);
+    if (stepIdx === -1) throw new Error(`Step #${stepNumber} not found.`);
+
+    const step = rec.roadmapSteps[stepIdx];
+    step.completedExercises = step.completedExercises || [];
+
+    const existingIdx = step.completedExercises.indexOf(exerciseIndex);
+    if (existingIdx !== -1) {
+      step.completedExercises.splice(existingIdx, 1);
+    } else {
+      step.completedExercises.push(exerciseIndex);
+    }
+
+    db.recommendations[idx] = rec;
+    this.save(db);
+    return rec;
+  }
+
+  public static startRoadmapStep(skillId: string, stepNumber: number): AIRecommendation {
+    const db = this.load();
+    const idx = db.recommendations.findIndex(r => r.skillId === skillId);
+    if (idx === -1) throw new Error("No learning roadmap found.");
+
+    const rec = db.recommendations[idx];
+    if (!rec.roadmapSteps) throw new Error("No roadmap steps found.");
+
+    const stepIdx = rec.roadmapSteps.findIndex(s => s.stepNumber === stepNumber);
+    if (stepIdx === -1) throw new Error(`Step #${stepNumber} not found.`);
+
+    rec.roadmapSteps[stepIdx].started = true;
+    db.recommendations[idx] = rec;
+    this.save(db);
+    return rec;
   }
 
   public static syncBackup(user: User, skills: Skill[], tasks: Task[], logs: ActivityLog[]): User {

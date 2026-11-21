@@ -62,8 +62,8 @@ function AppContent() {
     );
   }
 
-  // Auth Screen
-  if (!user) {
+  // Auth Screen (Login, Signup, or Email Verification)
+  if (!user || !user.emailVerified) {
     const urlParams = new URLSearchParams(window.location.search);
     const resetToken = urlParams.get('token') || urlParams.get('reset-token') || undefined;
     return (

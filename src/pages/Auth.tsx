@@ -4,9 +4,9 @@ import { motion, AnimatePresence } from 'motion/react';
 import { Mail, Lock, User, CheckCircle2, RefreshCw, Key, ShieldAlert, Check, Eye, EyeOff } from 'lucide-react';
 
 export default function Auth({ onResetParam }: { onResetParam?: string }) {
-  const { login, logout, addToast, token, user } = useApp();
+  const { login, logout, addToast, token, user, refreshUser } = useApp();
   const [mode, setMode] = useState<'login' | 'signup' | 'forgot' | 'reset' | 'verify'>(
-    onResetParam ? 'reset' : 'login'
+    onResetParam ? 'reset' : (user && !user.emailVerified ? 'verify' : 'login')
   );
   
   // Forms states
@@ -27,8 +27,10 @@ export default function Auth({ onResetParam }: { onResetParam?: string }) {
     if (onResetParam) {
       setMode('reset');
       setResetToken(onResetParam);
+    } else if (user && !user.emailVerified) {
+      setMode('verify');
     }
-  }, [onResetParam]);
+  }, [onResetParam, user]);
 
   // Handle Signup
   const handleSignUp = async (e: React.FormEvent) => {
@@ -46,7 +48,12 @@ export default function Auth({ onResetParam }: { onResetParam?: string }) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ name: trimmedName, email: trimmedEmail, password })
       });
-      const data = await res.json();
+      let data: any = {};
+      try {
+        data = await res.json();
+      } catch {
+        data = { error: "Registration failed." };
+      }
       if (res.ok) {
         addToast("Account registered! Please verify your email.", "success");
         // Back up password immediately
@@ -136,7 +143,13 @@ export default function Auth({ onResetParam }: { onResetParam?: string }) {
         }
       }
 
-      const data = await res.json();
+      let data: any = {};
+      try {
+        data = await res.json();
+      } catch {
+        data = { error: "Authentication failed. Please verify credentials." };
+      }
+
       if (res.ok) {
         // Back up password on successful login
         localStorage.setItem('skill_backup_password_' + trimmedEmail.toLowerCase(), password);
@@ -164,19 +177,25 @@ export default function Auth({ onResetParam }: { onResetParam?: string }) {
     }
     setFormLoading(true);
     try {
+      const activeToken = token || (user && user.id) || localStorage.getItem('skill_token');
       const res = await fetch('/api/auth/verify', {
         method: 'POST',
         headers: { 
           'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`
+          'Authorization': `Bearer ${activeToken}`
         },
         body: JSON.stringify({ code: code.trim() })
       });
-      const data = await res.json();
+      let data: any = {};
+      try {
+        data = await res.json();
+      } catch {
+        data = { error: "Verification failed." };
+      }
+
       if (res.ok) {
         addToast("Email verified successfully! Opening onboarding...", "success");
-        // Update user state locally
-        window.location.reload(); // Quick refresh triggers onboarding if completed is false
+        await refreshUser();
       } else {
         addToast(data.error || "Verification failed.", "error");
       }
@@ -335,6 +354,23 @@ export default function Auth({ onResetParam }: { onResetParam?: string }) {
                         {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                       </button>
                     </div>
+                  </div>
+
+                  <div className="p-3 rounded-xl bg-purple-50/80 dark:bg-zinc-800/60 border border-purple-200/60 dark:border-purple-800/40 flex items-center justify-between text-xs">
+                    <div>
+                      <span className="font-semibold text-purple-900 dark:text-purple-300">Demo Account:</span>
+                      <p className="text-[11px] text-gray-500 dark:text-zinc-400">rithvik0806@gmail.com</p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setEmail('rithvik0806@gmail.com');
+                        setPassword('password123');
+                      }}
+                      className="px-2.5 py-1 text-xs font-medium rounded-md bg-purple-600 hover:bg-purple-500 text-white transition shadow-sm"
+                    >
+                      Fill Demo
+                    </button>
                   </div>
 
                   <button

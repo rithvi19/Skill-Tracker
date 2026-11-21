@@ -1,9 +1,11 @@
+import "dotenv/config";
 import express, { Request, Response, NextFunction } from "express";
 import path from "path";
 import crypto from "crypto";
 import { createServer as createViteServer } from "vite";
 import { JSONDb } from "./server/db";
 import { generateRecommendations } from "./server/gemini";
+import { searchYouTubeTutorials } from "./server/youtube";
 
 // Extend Request types to hold custom user object
 interface AuthRequest extends Request {
@@ -501,7 +503,7 @@ async function startServer() {
   });
 
   // ==========================================
-  // AI RECOMMENDATIONS ROUTE
+  // AI LEARNING ROADMAP & YOUTUBE RECOMMENDATIONS ROUTES
   // ==========================================
 
   app.get("/api/skills/:skillId/recommendations", authenticateToken, async (req: AuthRequest, res) => {
@@ -513,8 +515,8 @@ async function startServer() {
       }
 
       let recs = JSONDb.getRecommendationsBySkill(skill.id);
-      if (!recs) {
-        // Fallback / Auto-generate now if none exists yet!
+      // Auto-generate if not existing or if legacy format lacks structured roadmapSteps
+      if (!recs || !recs.roadmapSteps || recs.roadmapSteps.length === 0) {
         const generated = await generateRecommendations(skill.name, skill.category, skill.difficulty);
         recs = JSONDb.createOrUpdateRecommendations(skill.id, generated);
       }
@@ -536,9 +538,103 @@ async function startServer() {
       const generated = await generateRecommendations(skill.name, skill.category, skill.difficulty);
       const recs = JSONDb.createOrUpdateRecommendations(skill.id, generated);
       
-      JSONDb.createLog(req.user.id, "AI Recommendations Triggered", `Refreshed recommendations learning suggestions for "${skill.name}".`);
+      JSONDb.createLog(req.user.id, "AI Roadmap Regenerated", `Regenerated interactive learning roadmap with YouTube video tutorials for "${skill.name}".`);
       
       res.json({ recommendations: recs });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // Toggle completion of a specific roadmap step and auto-update skill progress
+  app.put("/api/skills/:skillId/roadmap/steps/:stepNumber/complete", authenticateToken, (req: AuthRequest, res) => {
+    try {
+      const skill = JSONDb.getSkillById(req.params.skillId);
+      if (!skill || skill.userId !== req.user.id) {
+        res.status(404).json({ error: "Skill not found." });
+        return;
+      }
+
+      const stepNumber = parseInt(req.params.stepNumber, 10);
+      if (isNaN(stepNumber)) {
+        res.status(400).json({ error: "Invalid step number." });
+        return;
+      }
+
+      const { completed } = req.body;
+      const result = JSONDb.toggleRoadmapStep(skill.id, stepNumber, Boolean(completed));
+
+      const action = completed ? "Roadmap Step Completed" : "Roadmap Step Reopened";
+      JSONDb.createLog(req.user.id, action, `Marked Step #${stepNumber} as ${completed ? 'completed' : 'incomplete'} in "${skill.name}".`);
+
+      res.json({
+        recommendation: result.recommendation,
+        skill: result.skill
+      });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // Toggle practical exercise completion in a roadmap step
+  app.put("/api/skills/:skillId/roadmap/steps/:stepNumber/exercise", authenticateToken, (req: AuthRequest, res) => {
+    try {
+      const skill = JSONDb.getSkillById(req.params.skillId);
+      if (!skill || skill.userId !== req.user.id) {
+        res.status(404).json({ error: "Skill not found." });
+        return;
+      }
+
+      const stepNumber = parseInt(req.params.stepNumber, 10);
+      const exerciseIndex = parseInt(req.body.exerciseIndex, 10);
+
+      if (isNaN(stepNumber) || isNaN(exerciseIndex)) {
+        res.status(400).json({ error: "Invalid step number or exercise index." });
+        return;
+      }
+
+      const updated = JSONDb.toggleRoadmapStepExercise(skill.id, stepNumber, exerciseIndex);
+      res.json({ recommendation: updated });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // Start a roadmap step
+  app.put("/api/skills/:skillId/roadmap/steps/:stepNumber/start", authenticateToken, (req: AuthRequest, res) => {
+    try {
+      const skill = JSONDb.getSkillById(req.params.skillId);
+      if (!skill || skill.userId !== req.user.id) {
+        res.status(404).json({ error: "Skill not found." });
+        return;
+      }
+
+      const stepNumber = parseInt(req.params.stepNumber, 10);
+      if (isNaN(stepNumber)) {
+        res.status(400).json({ error: "Invalid step number." });
+        return;
+      }
+
+      const updated = JSONDb.startRoadmapStep(skill.id, stepNumber);
+      JSONDb.createLog(req.user.id, "Step Learning Started", `Started learning Step #${stepNumber} in "${skill.name}".`);
+      res.json({ recommendation: updated });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // Standalone YouTube Search API endpoint
+  app.get("/api/youtube/search", authenticateToken, async (req: AuthRequest, res) => {
+    try {
+      const query = (req.query.q as string)?.trim();
+      if (!query) {
+        res.status(400).json({ error: "Search query 'q' parameter is required." });
+        return;
+      }
+
+      const maxResults = parseInt(req.query.maxResults as string, 10) || 3;
+      const result = await searchYouTubeTutorials("", query, [], maxResults);
+      res.json(result);
     } catch (err: any) {
       res.status(500).json({ error: err.message });
     }
@@ -563,7 +659,12 @@ async function startServer() {
 
   if (process.env.NODE_ENV !== "production") {
     const vite = await createViteServer({
-      server: { middlewareMode: true },
+      server: {
+        middlewareMode: true,
+        watch: {
+          ignored: ['**/db.json', '**/db.json*'],
+        },
+      },
       appType: "spa",
     });
     app.use(vite.middlewares);
