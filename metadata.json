@@ -1,0 +1,6 @@
+{
+  "name": "Skill Tracker",
+  "description": "A premium full-stack Skill Tracker web application with dynamic AI recommendations, task progress estimation, streak analytics, and visual dashboards.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
